@@ -237,7 +237,7 @@
   </div>
 
   <!-- ─── Header ──────────────────────────────────────────────── -->
-  <h2>SpO2 BLE Validator &mdash; ChoiceMMed / iP900BPB <span class="version">v1.1</span></h2>
+  <h2>SpO2 BLE Validator &mdash; ChoiceMMed / iP900BPB <span class="version">v1.2</span></h2>
 
   <!-- ─── Connection Card ─────────────────────────────────────── -->
   <div class="card">
@@ -652,8 +652,9 @@ async function connect(useFilter) {
       }
 
       for (const c of chars) {
-        const props = Object.keys(c.properties).filter(k => c.properties[k]).join(', ');
-        appendSystemLog(`  Char ${c.uuid} [${props}]`);
+        const PROP_NAMES = ['broadcast','read','writeWithoutResponse','write','notify','indicate','authenticatedSignedWrites','reliableWrite','writableAuxiliaries'];
+        const props = PROP_NAMES.filter(p => c.properties[p]).join(', ');
+        appendSystemLog(`  Char ${c.uuid} [${props || 'none'}]`);
         if (c.properties.notify && !notifyChar) {
           notifyChar = c;
           appendSystemLog(`  → Selected for notifications`);
