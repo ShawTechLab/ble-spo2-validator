@@ -333,9 +333,14 @@
 // ─────────────────────────────────────────────────────────────────────────────
 // BLE CONSTANTS
 // ─────────────────────────────────────────────────────────────────────────────
-const SERVICE_UUID  = '6e400001-b5a3-f393-e0a9-e50e24dcca9e';
-const NOTIFY_UUID   = '0000fff1-0000-1000-8000-00805f9b34fb';
-const NAME_PREFIX   = 'iP900BPB';
+const NAME_PREFIX = 'iP900BPB';
+
+// Candidate service UUIDs to probe in order — device will use exactly one of these
+const SERVICE_CANDIDATES = [
+  '0000fff0-0000-1000-8000-00805f9b34fb',  // common Chinese BLE oximeter (most likely)
+  '6e400001-b5a3-f393-e0a9-e50e24dcca9e',  // Nordic UART
+  '0000ff00-0000-1000-8000-00805f9b34fb',  // alternate proprietary
+];
 
 // ─────────────────────────────────────────────────────────────────────────────
 // STATE
@@ -579,6 +584,21 @@ function appendLog(packet) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// SYSTEM LOG — discovery steps shown in the packet log UI
+// ─────────────────────────────────────────────────────────────────────────────
+function appendSystemLog(msg) {
+  console.log('[SYS]', msg);
+  if (packetLog.firstChild && packetLog.firstChild.tagName !== 'DIV') {
+    packetLog.innerHTML = '';
+  }
+  const div = document.createElement('div');
+  div.className = 'log-entry';
+  div.innerHTML = `<span class="log-ts">${timestamp()}</span><span class="log-vals" style="color:var(--accent)">${msg}</span>`;
+  packetLog.appendChild(div);
+  packetLog.scrollTop = packetLog.scrollHeight;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // BLE CONNECTION
 // ─────────────────────────────────────────────────────────────────────────────
 async function connect(useFilter) {
@@ -587,48 +607,67 @@ async function connect(useFilter) {
   setButtons(false);
   btnDisconn.disabled = true;
 
-  let requestOptions;
+  // All candidate services must be declared so the browser grants access to them
+  const optionalServices = [...SERVICE_CANDIDATES];
 
-  if (useFilter) {
-    // Filtered: tries to show only matching devices by service UUID / name prefix
-    requestOptions = {
-      filters: [
-        { services: [SERVICE_UUID] },
-        { namePrefix: NAME_PREFIX }
-      ]
-    };
-  } else {
-    // Fallback: show all devices; declare the service so the browser grants access
-    requestOptions = {
-      acceptAllDevices: true,
-      optionalServices: [SERVICE_UUID]
-    };
-  }
+  const requestOptions = useFilter
+    ? {
+        filters: [
+          { namePrefix: NAME_PREFIX },
+          ...SERVICE_CANDIDATES.map(s => ({ services: [s] }))
+        ],
+        optionalServices,
+      }
+    : { acceptAllDevices: true, optionalServices };
 
   try {
-    console.log('[BLE] Requesting device, useFilter=', useFilter);
     bleDevice = await navigator.bluetooth.requestDevice(requestOptions);
-    console.log('[BLE] Device selected:', bleDevice.name, bleDevice.id);
+    appendSystemLog(`Device: ${bleDevice.name || bleDevice.id}`);
 
-    // Listen for disconnect events so we can update UI
     bleDevice.addEventListener('gattserverdisconnected', onDisconnected);
 
     setStatus('Connecting to GATT…', 'connecting');
     bleServer = await bleDevice.gatt.connect();
-    console.log('[BLE] GATT connected');
+    appendSystemLog('GATT connected — scanning services…');
 
-    setStatus('Getting service…', 'connecting');
-    const service = await bleServer.getPrimaryService(SERVICE_UUID);
-    console.log('[BLE] Service found');
+    // ── Auto-discover: probe each candidate service for a notify characteristic
+    notifyChar = null;
+    for (const svcUuid of SERVICE_CANDIDATES) {
+      let svc;
+      try {
+        svc = await bleServer.getPrimaryService(svcUuid);
+      } catch {
+        appendSystemLog(`Service ${svcUuid}: not present`);
+        continue;
+      }
 
-    setStatus('Getting characteristic…', 'connecting');
-    notifyChar = await service.getCharacteristic(NOTIFY_UUID);
-    console.log('[BLE] Notify characteristic found');
+      appendSystemLog(`Service ${svcUuid}: FOUND`);
+      let chars;
+      try {
+        chars = await svc.getCharacteristics();
+      } catch {
+        appendSystemLog('  Could not read characteristics');
+        continue;
+      }
+
+      for (const c of chars) {
+        const props = Object.keys(c.properties).filter(k => c.properties[k]).join(', ');
+        appendSystemLog(`  Char ${c.uuid} [${props}]`);
+        if (c.properties.notify && !notifyChar) {
+          notifyChar = c;
+          appendSystemLog(`  → Selected for notifications`);
+        }
+      }
+    }
+
+    if (!notifyChar) {
+      throw new Error('No notify characteristic found — check Raw Packet Log for discovered services');
+    }
 
     setStatus('Starting notifications…', 'connecting');
     notifyChar.addEventListener('characteristicvaluechanged', onNotification);
     await notifyChar.startNotifications();
-    console.log('[BLE] Notifications started');
+    appendSystemLog('Notifications started');
 
     isConnected = true;
     setStatus('Connected — ' + (bleDevice.name || bleDevice.id), 'connected');
