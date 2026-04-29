@@ -118,6 +118,75 @@
       word-break: break-word;
     }
 
+    /* ─── GATT Services Panel ───────────────────────────────────── */
+    .svc-block { margin-bottom: 14px; }
+    .svc-label {
+      font-size: 0.68rem;
+      color: var(--accent);
+      font-family: 'Courier New', monospace;
+      margin-bottom: 6px;
+      word-break: break-all;
+    }
+    .char-row {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 10px;
+      margin-bottom: 6px;
+    }
+    .char-uuid-label {
+      font-size: 0.68rem;
+      font-family: 'Courier New', monospace;
+      color: var(--text);
+      word-break: break-all;
+      margin-bottom: 3px;
+    }
+    .char-props-label {
+      font-size: 0.65rem;
+      color: var(--muted);
+      margin-bottom: 8px;
+    }
+    .char-controls {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      align-items: center;
+    }
+    .btn-sm {
+      flex: 0 0 auto;
+      min-width: 0;
+      padding: 6px 12px;
+      font-size: 0.78rem;
+      font-weight: 600;
+      border-radius: 6px;
+      cursor: pointer;
+      border: 1px solid transparent;
+      transition: opacity 0.15s;
+    }
+    .btn-subscribe { background: var(--surface); color: var(--accent); border-color: var(--accent); }
+    .btn-subscribe.active { background: var(--accent); color: #000; }
+    .btn-read-sm { background: var(--surface); color: var(--muted); border-color: var(--border); }
+    .btn-write-sm { background: var(--surface); color: var(--yellow); border-color: var(--yellow); }
+    .hex-write-input {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      color: var(--text);
+      font-family: 'Courier New', monospace;
+      font-size: 0.75rem;
+      padding: 6px 8px;
+      width: 150px;
+      flex: 0 0 auto;
+    }
+    .hex-write-input:focus { outline: none; border-color: var(--yellow); }
+    .read-result {
+      font-size: 0.68rem;
+      font-family: 'Courier New', monospace;
+      color: var(--green);
+      margin-top: 6px;
+      word-break: break-all;
+    }
+
     /* ─── Vitals Grid ───────────────────────────────────────────── */
     .vitals-grid {
       display: grid;
@@ -155,7 +224,7 @@
       background: var(--bg);
       border: 1px solid var(--border);
       border-radius: var(--radius);
-      height: 200px;
+      height: 240px;
       overflow-y: auto;
       font-family: 'Courier New', Courier, monospace;
       font-size: 0.72rem;
@@ -164,12 +233,14 @@
 
     .log-entry { padding: 3px 0; border-bottom: 1px solid #1e2530; }
     .log-entry:last-child { border-bottom: none; }
-    .log-ts    { color: var(--muted); margin-right: 6px; }
+    .log-ts    { color: var(--muted); margin-right: 4px; }
+    .log-src   { color: var(--yellow); margin-right: 4px; font-size: 0.65rem; }
     .log-hex   { color: var(--text);  margin-right: 6px; }
     .log-type  { font-weight: 600; margin-right: 6px; }
-    .log-type.vitals { color: var(--accent); }
-    .log-type.pleth  { color: var(--green); }
-    .log-type.unknown{ color: var(--red); }
+    .log-type.vitals  { color: var(--accent); }
+    .log-type.pleth   { color: var(--green); }
+    .log-type.unknown { color: var(--red); }
+    .log-type.system  { color: var(--accent); }
     .log-vals  { color: var(--muted); }
 
     /* ─── Comparison Tool ───────────────────────────────────────── */
@@ -237,7 +308,7 @@
   </div>
 
   <!-- ─── Header ──────────────────────────────────────────────── -->
-  <h2>SpO2 BLE Validator &mdash; ChoiceMMed / iP900BPB <span class="version">v1.2</span></h2>
+  <h2>SpO2 BLE Validator &mdash; ChoiceMMed / iP900BPB <span class="version">v1.3</span></h2>
 
   <!-- ─── Connection Card ─────────────────────────────────────── -->
   <div class="card">
@@ -254,6 +325,12 @@
     </div>
 
     <div id="error-box"></div>
+  </div>
+
+  <!-- ─── GATT Services Card ──────────────────────────────────── -->
+  <div class="card" id="services-card" style="display:none">
+    <h3>GATT Services</h3>
+    <div id="services-list"></div>
   </div>
 
   <!-- ─── Live Vitals Card ─────────────────────────────────────── -->
@@ -336,73 +413,80 @@
 // ─────────────────────────────────────────────────────────────────────────────
 const NAME_PREFIX = 'iP900BPB';
 
-// Candidate service UUIDs to probe in order — device will use exactly one of these
 const SERVICE_CANDIDATES = [
-  '0000fff0-0000-1000-8000-00805f9b34fb',  // common Chinese BLE oximeter (most likely)
-  '6e400001-b5a3-f393-e0a9-e50e24dcca9e',  // Nordic UART
-  '0000ff00-0000-1000-8000-00805f9b34fb',  // alternate proprietary
+  '0000fff0-0000-1000-8000-00805f9b34fb',
+  '6e400001-b5a3-f393-e0a9-e50e24dcca9e',
+  '0000ff00-0000-1000-8000-00805f9b34fb',
+];
+
+const PROP_NAMES = [
+  'broadcast','read','writeWithoutResponse','write',
+  'notify','indicate','authenticatedSignedWrites','reliableWrite','writableAuxiliaries'
 ];
 
 // ─────────────────────────────────────────────────────────────────────────────
 // STATE
 // ─────────────────────────────────────────────────────────────────────────────
-let bleDevice          = null;   // BluetoothDevice
-let bleServer          = null;   // BluetoothRemoteGATTServer
-let notifyChar         = null;   // BluetoothRemoteGATTCharacteristic
-let isConnected        = false;
+let bleDevice   = null;
+let bleServer   = null;
+let isConnected = false;
 
-// Latest decoded vitals (used for comparison snapshots)
+// uuid → { char, handler } for all active notification subscriptions
+const activeSubs = new Map();
+
 let lastSpo2  = null;
 let lastPulse = null;
 let lastPi    = null;
 
-// Pleth waveform ring buffer — last 200 samples
-const WAVEFORM_MAX   = 200;
-const plethBuffer    = [];
-
-// Packet log — last 100 entries
-const LOG_MAX        = 100;
-const logEntries     = [];
+const WAVEFORM_MAX = 200;
+const plethBuffer  = [];
+const LOG_MAX      = 150;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // DOM REFS
 // ─────────────────────────────────────────────────────────────────────────────
-const btnFilterd    = document.getElementById('btn-connect-filtered');
-const btnFallback   = document.getElementById('btn-connect-fallback');
-const btnDisconn    = document.getElementById('btn-disconnect');
-const statusDot     = document.getElementById('status-dot');
-const statusText    = document.getElementById('status-text');
-const errorBox      = document.getElementById('error-box');
-const valSpo2       = document.getElementById('val-spo2');
-const valPulse      = document.getElementById('val-pulse');
-const valPi         = document.getElementById('val-pi');
-const packetLog     = document.getElementById('packet-log');
-const canvas        = document.getElementById('waveform-canvas');
-const ctx           = canvas.getContext('2d');
-const btnLogComp    = document.getElementById('btn-log-comparison');
-const compTbody     = document.getElementById('comp-tbody');
+const btnFilterd  = document.getElementById('btn-connect-filtered');
+const btnFallback = document.getElementById('btn-connect-fallback');
+const btnDisconn  = document.getElementById('btn-disconnect');
+const statusDot   = document.getElementById('status-dot');
+const statusText  = document.getElementById('status-text');
+const errorBox    = document.getElementById('error-box');
+const valSpo2     = document.getElementById('val-spo2');
+const valPulse    = document.getElementById('val-pulse');
+const valPi       = document.getElementById('val-pi');
+const packetLog   = document.getElementById('packet-log');
+const canvas      = document.getElementById('waveform-canvas');
+const ctx         = canvas.getContext('2d');
+const btnLogComp  = document.getElementById('btn-log-comparison');
+const compTbody   = document.getElementById('comp-tbody');
 
 // ─────────────────────────────────────────────────────────────────────────────
-// UTILITY: timestamp string
+// UTILITY
 // ─────────────────────────────────────────────────────────────────────────────
 function timestamp() {
   const d = new Date();
   return d.toTimeString().slice(0, 8) + '.' + String(d.getMilliseconds()).padStart(3, '0');
 }
 
+function toHex(bytes) {
+  return Array.from(bytes).map(b => b.toString(16).toUpperCase().padStart(2, '0')).join(' ');
+}
+
+function shortUuid(uuid) {
+  return uuid.slice(4, 8).toUpperCase();
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // UI HELPERS
 // ─────────────────────────────────────────────────────────────────────────────
 function setStatus(label, state) {
-  // state: 'connected' | 'connecting' | 'disconnected'
-  statusDot.className  = 'status-dot ' + state;
+  statusDot.className    = 'status-dot ' + state;
   statusText.textContent = label;
 }
 
 function showError(msg) {
   errorBox.style.display = 'block';
   errorBox.textContent   = '⚠ ' + msg;
-  console.error('[BLE Error]', msg);
 }
 
 function clearError() {
@@ -411,148 +495,92 @@ function clearError() {
 }
 
 function setButtons(connected) {
-  btnFilterd.disabled = connected;
+  btnFilterd.disabled  = connected;
   btnFallback.disabled = connected;
   btnDisconn.disabled  = !connected;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// PACKET LOG
+// ─────────────────────────────────────────────────────────────────────────────
+function appendLogEntry({ ts, type, hex, src, vals, isSystem }) {
+  if (packetLog.firstChild && packetLog.firstChild.tagName !== 'DIV') {
+    packetLog.innerHTML = '';
+  }
+  const div = document.createElement('div');
+  div.className = 'log-entry';
+
+  if (isSystem) {
+    div.innerHTML =
+      `<span class="log-ts">${ts}</span>` +
+      `<span class="log-type system">${hex}</span>`;
+  } else {
+    div.innerHTML =
+      `<span class="log-ts">${ts}</span>` +
+      (src ? `<span class="log-src">[${src}]</span>` : '') +
+      `<span class="log-hex">${hex}</span>` +
+      `<span class="log-type ${type}">[${type}]</span>` +
+      `<span class="log-vals">${vals || ''}</span>`;
+  }
+
+  packetLog.appendChild(div);
+  packetLog.scrollTop = packetLog.scrollHeight;
+  while (packetLog.children.length > LOG_MAX) packetLog.removeChild(packetLog.firstChild);
+}
+
+function appendSystemLog(msg) {
+  console.log('[SYS]', msg);
+  appendLogEntry({ ts: timestamp(), hex: msg, isSystem: true });
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // PACKET DECODER
 // ─────────────────────────────────────────────────────────────────────────────
-/**
- * Classifies and decodes a raw BLE notification packet.
- *
- * Packet formats confirmed for ChoiceMMed / iP900BPB:
- *
- *   Pleth  : [0x01, pleth_value]           length === 2
- *   Vitals : [0x3E, spo2, 0x00, pulse,     length >= 13
- *              0x00, zz, 0x20, 0x00,
- *              0x00, 0x00, 0x00, pi_raw, 0xF0]
- *
- * Returns an object: { type, hex, ...decoded fields }
- */
 function decodePacket(bytes) {
-  // Minimum packet size check — anything shorter is garbage
-  if (bytes.length < 2) {
-    return { type: 'unknown', hex: toHex(bytes) };
-  }
+  if (bytes.length < 2) return { type: 'unknown', hex: toHex(bytes) };
 
   const hex = toHex(bytes);
 
-  // ── Pleth waveform packet ──────────────────────────────────────
   if (bytes.length === 2 && bytes[0] === 0x01) {
-    const pleth = bytes[1];
-    console.log(`[Pleth] hex=${hex} pleth=${pleth}`);
-    return { type: 'pleth', hex, pleth };
+    return { type: 'pleth', hex, pleth: bytes[1] };
   }
 
-  // ── Vitals packet ──────────────────────────────────────────────
-  // Must be at least 13 bytes and start with 0x3E
   if (bytes.length >= 13 && bytes[0] === 0x3E) {
-    const spo2            = bytes[1];
-    const pulse           = bytes[3];
-    const perfusionIndex  = bytes[11] / 10;   // raw byte / 10 → e.g. 0x39 (57) → 5.7
-    console.log(`[Vitals] hex=${hex} spo2=${spo2} pulse=${pulse} PI=${perfusionIndex}`);
-    return { type: 'vitals', hex, spo2, pulse, perfusionIndex };
+    return {
+      type: 'vitals',
+      hex,
+      spo2:           bytes[1],
+      pulse:          bytes[3],
+      perfusionIndex: bytes[11] / 10,
+    };
   }
 
-  // ── Unknown / unrecognized packet ─────────────────────────────
-  console.log(`[Unknown] hex=${hex}`);
   return { type: 'unknown', hex };
 }
 
-/** Convert byte array to uppercase hex string, e.g. "3E 60 00 4B" */
-function toHex(bytes) {
-  return Array.from(bytes).map(b => b.toString(16).toUpperCase().padStart(2, '0')).join(' ');
-}
-
 // ─────────────────────────────────────────────────────────────────────────────
-// BLE NOTIFICATION HANDLER
+// NOTIFICATION HANDLER
 // ─────────────────────────────────────────────────────────────────────────────
-function onNotification(event) {
-  const dataView = event.target.value;
-
-  // Convert DataView → plain Uint8Array for easier indexing
-  const bytes = new Uint8Array(dataView.buffer);
-
+function onNotificationFromChar(event, uuid) {
+  const bytes  = new Uint8Array(event.target.value.buffer);
   const packet = decodePacket(bytes);
+  const src    = shortUuid(uuid);
 
-  // ── Update vitals display ──────────────────────────────────────
   if (packet.type === 'vitals') {
     lastSpo2  = packet.spo2;
     lastPulse = packet.pulse;
     lastPi    = packet.perfusionIndex;
-
     valSpo2.textContent  = packet.spo2;
     valPulse.textContent = packet.pulse;
     valPi.textContent    = packet.perfusionIndex.toFixed(1);
   }
 
-  // ── Update waveform buffer ─────────────────────────────────────
   if (packet.type === 'pleth') {
     plethBuffer.push(packet.pleth);
     if (plethBuffer.length > WAVEFORM_MAX) plethBuffer.shift();
     drawWaveform();
   }
 
-  // ── Append to raw packet log ───────────────────────────────────
-  appendLog(packet);
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// WAVEFORM RENDERER
-// ─────────────────────────────────────────────────────────────────────────────
-function drawWaveform() {
-  // Resize canvas pixels to match display size (handles device pixel ratio)
-  const dpr = window.devicePixelRatio || 1;
-  const rect = canvas.getBoundingClientRect();
-  canvas.width  = rect.width  * dpr;
-  canvas.height = rect.height * dpr;
-  ctx.scale(dpr, dpr);
-
-  const W = rect.width;
-  const H = rect.height;
-
-  ctx.clearRect(0, 0, W, H);
-
-  if (plethBuffer.length < 2) return;
-
-  // Find min/max in buffer for normalization
-  let min = 255, max = 0;
-  for (const v of plethBuffer) {
-    if (v < min) min = v;
-    if (v > max) max = v;
-  }
-  const range = max - min || 1;   // avoid divide-by-zero
-
-  const stepX = W / (WAVEFORM_MAX - 1);
-
-  ctx.beginPath();
-  ctx.strokeStyle = '#3fb950';    // green trace
-  ctx.lineWidth   = 1.5;
-  ctx.lineJoin    = 'round';
-
-  for (let i = 0; i < plethBuffer.length; i++) {
-    // Invert Y so higher pleth values appear higher on screen
-    const x = i * stepX;
-    const y = H - ((plethBuffer[i] - min) / range) * (H * 0.85) - H * 0.075;
-
-    if (i === 0) ctx.moveTo(x, y);
-    else         ctx.lineTo(x, y);
-  }
-
-  ctx.stroke();
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// RAW PACKET LOG
-// ─────────────────────────────────────────────────────────────────────────────
-function appendLog(packet) {
-  const entry = { ts: timestamp(), ...packet };
-  logEntries.push(entry);
-  if (logEntries.length > LOG_MAX) logEntries.shift();
-
-  // Build decoded values string
   let vals = '';
   if (packet.type === 'vitals') {
     vals = `SpO2=${packet.spo2}% Pulse=${packet.pulse}bpm PI=${packet.perfusionIndex.toFixed(1)}`;
@@ -560,47 +588,168 @@ function appendLog(packet) {
     vals = `pleth=${packet.pleth}`;
   }
 
-  const div = document.createElement('div');
-  div.className = 'log-entry';
-  div.innerHTML =
-    `<span class="log-ts">${entry.ts}</span>` +
-    `<span class="log-hex">${entry.hex}</span>` +
-    `<span class="log-type ${entry.type}">[${entry.type}]</span>` +
-    `<span class="log-vals">${vals}</span>`;
+  appendLogEntry({ ts: timestamp(), type: packet.type, hex: packet.hex, src, vals });
+}
 
-  // If the log was showing the placeholder, clear it first
-  if (packetLog.firstChild && packetLog.firstChild.tagName !== 'DIV') {
-    packetLog.innerHTML = '';
+// ─────────────────────────────────────────────────────────────────────────────
+// WAVEFORM
+// ─────────────────────────────────────────────────────────────────────────────
+function drawWaveform() {
+  const dpr  = window.devicePixelRatio || 1;
+  const rect = canvas.getBoundingClientRect();
+  canvas.width  = rect.width  * dpr;
+  canvas.height = rect.height * dpr;
+  ctx.scale(dpr, dpr);
+
+  const W = rect.width, H = rect.height;
+  ctx.clearRect(0, 0, W, H);
+  if (plethBuffer.length < 2) return;
+
+  let min = 255, max = 0;
+  for (const v of plethBuffer) { if (v < min) min = v; if (v > max) max = v; }
+  const range = max - min || 1;
+  const stepX = W / (WAVEFORM_MAX - 1);
+
+  ctx.beginPath();
+  ctx.strokeStyle = '#3fb950';
+  ctx.lineWidth   = 1.5;
+  ctx.lineJoin    = 'round';
+
+  for (let i = 0; i < plethBuffer.length; i++) {
+    const x = i * stepX;
+    const y = H - ((plethBuffer[i] - min) / range) * (H * 0.85) - H * 0.075;
+    if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
   }
+  ctx.stroke();
+}
 
-  packetLog.appendChild(div);
+// ─────────────────────────────────────────────────────────────────────────────
+// SUBSCRIBE / UNSUBSCRIBE
+// ─────────────────────────────────────────────────────────────────────────────
+async function subscribeToChar(c) {
+  if (activeSubs.has(c.uuid)) return;
+  try {
+    const handler = (evt) => onNotificationFromChar(evt, c.uuid);
+    c.addEventListener('characteristicvaluechanged', handler);
+    await c.startNotifications();
+    activeSubs.set(c.uuid, { char: c, handler });
+    appendSystemLog(`Subscribed: ${c.uuid}`);
+    updateSubButton(c.uuid, true);
+  } catch (e) {
+    appendSystemLog(`Subscribe failed (${shortUuid(c.uuid)}): ${e.message}`);
+  }
+}
 
-  // Keep scroll pinned to bottom
-  packetLog.scrollTop = packetLog.scrollHeight;
+async function unsubscribeFromChar(uuid) {
+  const sub = activeSubs.get(uuid);
+  if (!sub) return;
+  try {
+    sub.char.removeEventListener('characteristicvaluechanged', sub.handler);
+    await sub.char.stopNotifications();
+  } catch {}
+  activeSubs.delete(uuid);
+  updateSubButton(uuid, false);
+}
 
-  // Trim DOM nodes to LOG_MAX
-  while (packetLog.children.length > LOG_MAX) {
-    packetLog.removeChild(packetLog.firstChild);
+function updateSubButton(uuid, active) {
+  const btn = document.getElementById(`sub-btn-${uuid}`);
+  if (!btn) return;
+  btn.textContent = active ? 'Unsubscribe' : 'Subscribe';
+  btn.classList.toggle('active', active);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// READ / WRITE
+// ─────────────────────────────────────────────────────────────────────────────
+async function readChar(c) {
+  try {
+    const val   = await c.readValue();
+    const bytes = new Uint8Array(val.buffer);
+    const hex   = toHex(bytes);
+    appendSystemLog(`Read ${c.uuid}: ${hex}`);
+    const el = document.getElementById(`read-result-${c.uuid}`);
+    if (el) el.textContent = hex;
+  } catch (e) {
+    appendSystemLog(`Read failed (${shortUuid(c.uuid)}): ${e.message}`);
+  }
+}
+
+async function writeChar(c) {
+  const input  = document.getElementById(`hex-input-${c.uuid}`);
+  const hexStr = (input?.value || '').trim().replace(/\s+/g, '');
+
+  if (!hexStr || hexStr.length % 2 !== 0) {
+    showError('Invalid hex — enter byte pairs like: AA 55 0F');
+    return;
+  }
+  clearError();
+
+  const bytes = new Uint8Array(hexStr.match(/.{2}/g).map(b => parseInt(b, 16)));
+  try {
+    if (c.properties.writeWithoutResponse) {
+      await c.writeValueWithoutResponse(bytes);
+    } else {
+      await c.writeValueWithResponse(bytes);
+    }
+    appendSystemLog(`Wrote ${c.uuid}: ${toHex(bytes)}`);
+  } catch (e) {
+    showError(`Write failed: ${e.message}`);
   }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// SYSTEM LOG — discovery steps shown in the packet log UI
+// GATT SERVICES UI
 // ─────────────────────────────────────────────────────────────────────────────
-function appendSystemLog(msg) {
-  console.log('[SYS]', msg);
-  if (packetLog.firstChild && packetLog.firstChild.tagName !== 'DIV') {
-    packetLog.innerHTML = '';
+function buildServicesUI(allServices) {
+  const list = document.getElementById('services-list');
+  list.innerHTML = '';
+  document.getElementById('services-card').style.display = 'block';
+
+  for (const { svcUuid, chars } of allServices) {
+    const svcDiv = document.createElement('div');
+    svcDiv.className = 'svc-block';
+    svcDiv.innerHTML = `<div class="svc-label">Service: ${svcUuid}</div>`;
+
+    for (const c of chars) {
+      const props = PROP_NAMES.filter(p => c.properties[p]).join(', ');
+
+      const charDiv = document.createElement('div');
+      charDiv.className = 'char-row';
+
+      let html = `<div class="char-uuid-label">${c.uuid}</div>
+                  <div class="char-props-label">[${props || 'none'}]</div>
+                  <div class="char-controls">`;
+
+      if (c.properties.notify || c.properties.indicate) {
+        html += `<button class="btn-sm btn-subscribe" id="sub-btn-${c.uuid}">Subscribe</button>`;
+      }
+      if (c.properties.read) {
+        html += `<button class="btn-sm btn-read-sm" id="read-btn-${c.uuid}">Read</button>`;
+      }
+      if (c.properties.write || c.properties.writeWithoutResponse) {
+        html += `<input class="hex-write-input" id="hex-input-${c.uuid}" type="text" placeholder="AA 55 0F …" autocomplete="off" autocorrect="off" spellcheck="false">
+                 <button class="btn-sm btn-write-sm" id="write-btn-${c.uuid}">Send</button>`;
+      }
+
+      html += `</div><div class="read-result" id="read-result-${c.uuid}"></div>`;
+      charDiv.innerHTML = html;
+      svcDiv.appendChild(charDiv);
+
+      // Wire up buttons after inserting into DOM
+      document.getElementById(`sub-btn-${c.uuid}`)
+        ?.addEventListener('click', () => activeSubs.has(c.uuid) ? unsubscribeFromChar(c.uuid) : subscribeToChar(c));
+      document.getElementById(`read-btn-${c.uuid}`)
+        ?.addEventListener('click', () => readChar(c));
+      document.getElementById(`write-btn-${c.uuid}`)
+        ?.addEventListener('click', () => writeChar(c));
+    }
+
+    list.appendChild(svcDiv);
   }
-  const div = document.createElement('div');
-  div.className = 'log-entry';
-  div.innerHTML = `<span class="log-ts">${timestamp()}</span><span class="log-vals" style="color:var(--accent)">${msg}</span>`;
-  packetLog.appendChild(div);
-  packetLog.scrollTop = packetLog.scrollHeight;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// BLE CONNECTION
+// CONNECT
 // ─────────────────────────────────────────────────────────────────────────────
 async function connect(useFilter) {
   clearError();
@@ -608,14 +757,13 @@ async function connect(useFilter) {
   setButtons(false);
   btnDisconn.disabled = true;
 
-  // All candidate services must be declared so the browser grants access to them
   const optionalServices = [...SERVICE_CANDIDATES];
 
   const requestOptions = useFilter
     ? {
         filters: [
           { namePrefix: NAME_PREFIX },
-          ...SERVICE_CANDIDATES.map(s => ({ services: [s] }))
+          ...SERVICE_CANDIDATES.map(s => ({ services: [s] })),
         ],
         optionalServices,
       }
@@ -624,15 +772,14 @@ async function connect(useFilter) {
   try {
     bleDevice = await navigator.bluetooth.requestDevice(requestOptions);
     appendSystemLog(`Device: ${bleDevice.name || bleDevice.id}`);
-
     bleDevice.addEventListener('gattserverdisconnected', onDisconnected);
 
     setStatus('Connecting to GATT…', 'connecting');
     bleServer = await bleDevice.gatt.connect();
     appendSystemLog('GATT connected — scanning services…');
 
-    // ── Auto-discover: probe each candidate service for a notify characteristic
-    notifyChar = null;
+    // Discover all candidate services and their characteristics
+    const allServices = [];
     for (const svcUuid of SERVICE_CANDIDATES) {
       let svc;
       try {
@@ -641,48 +788,39 @@ async function connect(useFilter) {
         appendSystemLog(`Service ${svcUuid}: not present`);
         continue;
       }
-
       appendSystemLog(`Service ${svcUuid}: FOUND`);
-      let chars;
-      try {
-        chars = await svc.getCharacteristics();
-      } catch {
-        appendSystemLog('  Could not read characteristics');
-        continue;
-      }
+
+      let chars = [];
+      try { chars = await svc.getCharacteristics(); } catch {}
 
       for (const c of chars) {
-        const PROP_NAMES = ['broadcast','read','writeWithoutResponse','write','notify','indicate','authenticatedSignedWrites','reliableWrite','writableAuxiliaries'];
         const props = PROP_NAMES.filter(p => c.properties[p]).join(', ');
         appendSystemLog(`  Char ${c.uuid} [${props || 'none'}]`);
-        if (c.properties.notify && !notifyChar) {
-          notifyChar = c;
-          appendSystemLog(`  → Selected for notifications`);
+      }
+      allServices.push({ svcUuid, chars });
+    }
+
+    buildServicesUI(allServices);
+
+    // Auto-subscribe to all notify/indicate characteristics
+    for (const { chars } of allServices) {
+      for (const c of chars) {
+        if (c.properties.notify || c.properties.indicate) {
+          await subscribeToChar(c);
         }
       }
     }
-
-    if (!notifyChar) {
-      throw new Error('No notify characteristic found — check Raw Packet Log for discovered services');
-    }
-
-    setStatus('Starting notifications…', 'connecting');
-    notifyChar.addEventListener('characteristicvaluechanged', onNotification);
-    await notifyChar.startNotifications();
-    appendSystemLog('Notifications started');
 
     isConnected = true;
     setStatus('Connected — ' + (bleDevice.name || bleDevice.id), 'connected');
     setButtons(true);
 
   } catch (err) {
-    console.error('[BLE] Connection failed:', err);
+    console.error('[BLE]', err);
     showError(err.message || String(err));
     setStatus('Connection failed', 'disconnected');
     setButtons(false);
-    bleDevice = null;
-    bleServer = null;
-    notifyChar = null;
+    bleDevice = bleServer = null;
   }
 }
 
@@ -690,25 +828,18 @@ async function connect(useFilter) {
 // DISCONNECT
 // ─────────────────────────────────────────────────────────────────────────────
 async function disconnect() {
-  if (notifyChar) {
-    try {
-      notifyChar.removeEventListener('characteristicvaluechanged', onNotification);
-      await notifyChar.stopNotifications();
-    } catch (e) {
-      console.warn('[BLE] stopNotifications error (ignored):', e);
-    }
+  for (const uuid of [...activeSubs.keys()]) {
+    await unsubscribeFromChar(uuid);
   }
-  if (bleDevice && bleDevice.gatt.connected) {
-    bleDevice.gatt.disconnect();
-  }
+  if (bleDevice?.gatt.connected) bleDevice.gatt.disconnect();
   onDisconnected();
 }
 
 function onDisconnected() {
-  console.log('[BLE] Disconnected');
   isConnected = false;
   bleServer   = null;
-  notifyChar  = null;
+  activeSubs.clear();
+  document.getElementById('services-card').style.display = 'none';
   setStatus('Disconnected', 'disconnected');
   setButtons(false);
 }
@@ -727,67 +858,53 @@ function logComparison() {
   }
   clearError();
 
-  const appSpo2  = lastSpo2  !== null ? lastSpo2  : null;
-  const appPulse = lastPulse !== null ? lastPulse : null;
-  const appPi    = lastPi    !== null ? lastPi    : null;
-
-  const fmt  = (v)         => v !== null ? v         : '—';
-  const fmtF = (v)         => v !== null ? v.toFixed(1) : '—';
+  const fmt  = v => v !== null ? v : '—';
+  const fmtF = v => v !== null ? v.toFixed(1) : '—';
   const diff = (a, b, dec) => {
     if (a === null) return { text: '—', cls: '' };
     const d = parseFloat((a - b).toFixed(dec));
-    const ad = Math.abs(d);
-    const cls = ad === 0 ? 'diff-ok' : ad <= 1 ? 'diff-warn' : 'diff-bad';
+    const cls = Math.abs(d) === 0 ? 'diff-ok' : Math.abs(d) <= 1 ? 'diff-warn' : 'diff-bad';
     return { text: (d >= 0 ? '+' : '') + d, cls };
   };
 
-  const dSpo2  = diff(appSpo2,  devSpo2,  0);
-  const dPulse = diff(appPulse, devPulse, 0);
-  const dPi    = diff(appPi,    devPi,    1);
-
-  console.log(`[Comparison] ${timestamp()} SpO2 app=${appSpo2} dev=${devSpo2} Δ=${dSpo2.text} | Pulse app=${appPulse} dev=${devPulse} Δ=${dPulse.text} | PI app=${appPi} dev=${devPi} Δ=${dPi.text}`);
+  const dSpo2  = diff(lastSpo2,  devSpo2,  0);
+  const dPulse = diff(lastPulse, devPulse, 0);
+  const dPi    = diff(lastPi,    devPi,    1);
 
   const tr = document.createElement('tr');
   tr.innerHTML =
     `<td>${timestamp()}</td>` +
-    `<td>${fmt(appSpo2)}</td><td>${devSpo2}</td><td class="${dSpo2.cls}">${dSpo2.text}</td>` +
-    `<td>${fmt(appPulse)}</td><td>${devPulse}</td><td class="${dPulse.cls}">${dPulse.text}</td>` +
-    `<td>${fmtF(appPi)}</td><td>${devPi.toFixed(1)}</td><td class="${dPi.cls}">${dPi.text}</td>`;
+    `<td>${fmt(lastSpo2)}</td><td>${devSpo2}</td><td class="${dSpo2.cls}">${dSpo2.text}</td>` +
+    `<td>${fmt(lastPulse)}</td><td>${devPulse}</td><td class="${dPulse.cls}">${dPulse.text}</td>` +
+    `<td>${fmtF(lastPi)}</td><td>${devPi.toFixed(1)}</td><td class="${dPi.cls}">${dPi.text}</td>`;
 
   compTbody.appendChild(tr);
-
-  // Auto-scroll comparison table to newest row
   tr.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
 // EVENT LISTENERS
 // ─────────────────────────────────────────────────────────────────────────────
-btnFilterd.addEventListener('click', () => connect(true));
+btnFilterd.addEventListener('click',  () => connect(true));
 btnFallback.addEventListener('click', () => connect(false));
 btnDisconn.addEventListener('click',  disconnect);
 btnLogComp.addEventListener('click',  logComparison);
 
-// ─────────────────────────────────────────────────────────────────────────────
-// CANVAS INIT
-// ─────────────────────────────────────────────────────────────────────────────
-// Draw empty canvas on load so the element has visible dimensions
 window.addEventListener('load', () => {
   const rect = canvas.getBoundingClientRect();
   canvas.width  = rect.width  * (window.devicePixelRatio || 1);
   canvas.height = rect.height * (window.devicePixelRatio || 1);
 });
 
-// Redraw waveform if window is resized (e.g. orientation change)
 window.addEventListener('resize', () => {
   if (plethBuffer.length > 0) drawWaveform();
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// WEB BLUETOOTH AVAILABILITY CHECK
+// WEB BLUETOOTH CHECK
 // ─────────────────────────────────────────────────────────────────────────────
 if (!navigator.bluetooth) {
-  showError('Web Bluetooth is not available in this browser. Open this page in Bluefy on iOS, or a Chromium-based browser on desktop.');
+  showError('Web Bluetooth is not available. Open in Bluefy on iOS or a Chromium browser on desktop.');
   btnFilterd.disabled = true;
   btnFallback.disabled = true;
 }
