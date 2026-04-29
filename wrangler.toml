@@ -1,0 +1,10 @@
+name = "ble-spo2-validator"
+compatibility_date = "2025-04-01"
+account_id = "f4277ab9a674b5e71315c27cd686d732"
+
+[assets]
+directory = "./public"
+
+[[routes]]
+pattern = "spo2.shawtechlab.com"
+custom_domain = true
