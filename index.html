@@ -1,0 +1,755 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0" />
+  <title>SpO2 BLE Validator</title>
+  <style>
+    /* ─── Reset & Base ─────────────────────────────────────────── */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:       #0d1117;
+      --surface:  #161b22;
+      --border:   #30363d;
+      --accent:   #58a6ff;
+      --green:    #3fb950;
+      --red:      #f85149;
+      --yellow:   #d29922;
+      --text:     #e6edf3;
+      --muted:    #8b949e;
+      --radius:   10px;
+    }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      font-size: 16px;
+      line-height: 1.5;
+      padding: 16px;
+      max-width: 640px;
+      margin: 0 auto;
+    }
+
+    h2 { font-size: 1.1rem; color: var(--muted); font-weight: 500; margin-bottom: 12px; }
+    h3 { font-size: 0.85rem; color: var(--muted); font-weight: 500; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 8px; }
+
+    /* ─── Notice Banner ────────────────────────────────────────── */
+    .notice {
+      background: #1c2333;
+      border: 1px solid var(--accent);
+      border-radius: var(--radius);
+      padding: 10px 14px;
+      font-size: 0.85rem;
+      color: var(--accent);
+      margin-bottom: 20px;
+      text-align: center;
+    }
+
+    /* ─── Card ──────────────────────────────────────────────────── */
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 16px;
+      margin-bottom: 16px;
+    }
+
+    /* ─── Buttons ───────────────────────────────────────────────── */
+    .btn-row {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+
+    button {
+      flex: 1;
+      min-width: 120px;
+      padding: 14px 10px;
+      border: none;
+      border-radius: var(--radius);
+      font-size: 1rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: opacity 0.15s;
+      -webkit-tap-highlight-color: transparent;
+    }
+    button:active { opacity: 0.75; }
+    button:disabled { opacity: 0.35; cursor: not-allowed; }
+
+    #btn-connect-filtered  { background: var(--accent);  color: #000; }
+    #btn-connect-fallback  { background: var(--yellow);  color: #000; }
+    #btn-disconnect        { background: var(--red);     color: #fff; }
+    #btn-log-comparison    { background: var(--green);   color: #000; width: 100%; margin-top: 10px; }
+
+    /* ─── Status Indicator ──────────────────────────────────────── */
+    .status-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-top: 12px;
+    }
+    .status-dot {
+      width: 12px;
+      height: 12px;
+      border-radius: 50%;
+      background: var(--muted);
+      flex-shrink: 0;
+      transition: background 0.3s;
+    }
+    .status-dot.connected    { background: var(--green); box-shadow: 0 0 6px var(--green); }
+    .status-dot.connecting   { background: var(--yellow); }
+    .status-dot.disconnected { background: var(--red); }
+
+    #status-text { font-size: 0.9rem; color: var(--muted); }
+
+    /* ─── Error ─────────────────────────────────────────────────── */
+    #error-box {
+      display: none;
+      background: #2d1118;
+      border: 1px solid var(--red);
+      border-radius: var(--radius);
+      padding: 10px 14px;
+      font-size: 0.85rem;
+      color: var(--red);
+      margin-top: 12px;
+      word-break: break-word;
+    }
+
+    /* ─── Vitals Grid ───────────────────────────────────────────── */
+    .vitals-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr 1fr;
+      gap: 12px;
+    }
+
+    .vital-box {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 14px 10px;
+      text-align: center;
+    }
+    .vital-box .label { font-size: 0.75rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; }
+    .vital-box .value { font-size: 2.6rem; font-weight: 700; line-height: 1.1; margin: 4px 0 2px; }
+    .vital-box .unit  { font-size: 0.7rem;  color: var(--muted); }
+
+    #val-spo2  { color: var(--accent); }
+    #val-pulse { color: var(--green); }
+    #val-pi    { color: var(--yellow); }
+
+    /* ─── Waveform Canvas ───────────────────────────────────────── */
+    #waveform-canvas {
+      display: block;
+      width: 100%;
+      height: 120px;
+      background: var(--bg);
+      border-radius: var(--radius);
+      border: 1px solid var(--border);
+    }
+
+    /* ─── Raw Packet Log ────────────────────────────────────────── */
+    #packet-log {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      height: 200px;
+      overflow-y: auto;
+      font-family: 'Courier New', Courier, monospace;
+      font-size: 0.72rem;
+      padding: 8px;
+    }
+
+    .log-entry { padding: 3px 0; border-bottom: 1px solid #1e2530; }
+    .log-entry:last-child { border-bottom: none; }
+    .log-ts    { color: var(--muted); margin-right: 6px; }
+    .log-hex   { color: var(--text);  margin-right: 6px; }
+    .log-type  { font-weight: 600; margin-right: 6px; }
+    .log-type.vitals { color: var(--accent); }
+    .log-type.pleth  { color: var(--green); }
+    .log-type.unknown{ color: var(--red); }
+    .log-vals  { color: var(--muted); }
+
+    /* ─── Comparison Tool ───────────────────────────────────────── */
+    .input-row {
+      display: grid;
+      grid-template-columns: 1fr 1fr 1fr;
+      gap: 10px;
+      margin-bottom: 4px;
+    }
+    .input-group label {
+      display: block;
+      font-size: 0.75rem;
+      color: var(--muted);
+      margin-bottom: 4px;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+    .input-group input {
+      width: 100%;
+      padding: 10px;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      color: var(--text);
+      font-size: 1.1rem;
+      text-align: center;
+      -webkit-appearance: none;
+    }
+    .input-group input:focus { outline: none; border-color: var(--accent); }
+
+    /* ─── Comparison Table ──────────────────────────────────────── */
+    .comp-table-wrap {
+      overflow-x: auto;
+      margin-top: 12px;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.78rem;
+    }
+    th {
+      background: var(--bg);
+      color: var(--muted);
+      padding: 6px 8px;
+      text-align: left;
+      font-weight: 500;
+      border-bottom: 1px solid var(--border);
+    }
+    td {
+      padding: 6px 8px;
+      border-bottom: 1px solid #1e2530;
+      font-family: 'Courier New', Courier, monospace;
+    }
+    tr:last-child td { border-bottom: none; }
+    .diff-ok   { color: var(--green); }
+    .diff-warn { color: var(--yellow); }
+    .diff-bad  { color: var(--red); }
+  </style>
+</head>
+<body>
+
+  <!-- ─── Notice ──────────────────────────────────────────────── -->
+  <div class="notice">
+    Open this app in <strong>Bluefy</strong> on iPhone. Must be served over HTTPS.
+  </div>
+
+  <!-- ─── Header ──────────────────────────────────────────────── -->
+  <h2>SpO2 BLE Validator &mdash; ChoiceMMed / iP900BPB</h2>
+
+  <!-- ─── Connection Card ─────────────────────────────────────── -->
+  <div class="card">
+    <h3>Connection</h3>
+    <div class="btn-row">
+      <button id="btn-connect-filtered">Connect (Filtered)</button>
+      <button id="btn-connect-fallback">Connect (Fallback)</button>
+      <button id="btn-disconnect" disabled>Disconnect</button>
+    </div>
+
+    <div class="status-row">
+      <div class="status-dot disconnected" id="status-dot"></div>
+      <span id="status-text">Not connected</span>
+    </div>
+
+    <div id="error-box"></div>
+  </div>
+
+  <!-- ─── Live Vitals Card ─────────────────────────────────────── -->
+  <div class="card">
+    <h3>Live Vitals</h3>
+    <div class="vitals-grid">
+      <div class="vital-box">
+        <div class="label">SpO2</div>
+        <div class="value" id="val-spo2">—</div>
+        <div class="unit">%</div>
+      </div>
+      <div class="vital-box">
+        <div class="label">Pulse</div>
+        <div class="value" id="val-pulse">—</div>
+        <div class="unit">bpm</div>
+      </div>
+      <div class="vital-box">
+        <div class="label">PI</div>
+        <div class="value" id="val-pi">—</div>
+        <div class="unit">PI / signal strength estimate</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ─── Waveform Card ───────────────────────────────────────── -->
+  <div class="card">
+    <h3>Pleth Waveform</h3>
+    <canvas id="waveform-canvas"></canvas>
+  </div>
+
+  <!-- ─── Raw Packet Log Card ─────────────────────────────────── -->
+  <div class="card">
+    <h3>Raw Packet Log</h3>
+    <div id="packet-log"><span style="color:var(--muted)">Waiting for packets...</span></div>
+  </div>
+
+  <!-- ─── Comparison Tool Card ─────────────────────────────────── -->
+  <div class="card">
+    <h3>Comparison Tool — Enter Device Display Values</h3>
+    <div class="input-row">
+      <div class="input-group">
+        <label>Device SpO2 (%)</label>
+        <input type="number" id="input-spo2" min="0" max="100" inputmode="numeric" placeholder="96" />
+      </div>
+      <div class="input-group">
+        <label>Device Pulse (bpm)</label>
+        <input type="number" id="input-pulse" min="0" max="300" inputmode="numeric" placeholder="75" />
+      </div>
+      <div class="input-group">
+        <label>Device PI</label>
+        <input type="number" id="input-pi" min="0" max="20" step="0.1" inputmode="decimal" placeholder="5.7" />
+      </div>
+    </div>
+    <button id="btn-log-comparison">Log Comparison</button>
+
+    <div class="comp-table-wrap">
+      <table id="comp-table">
+        <thead>
+          <tr>
+            <th>Time</th>
+            <th>SpO2 App</th>
+            <th>SpO2 Dev</th>
+            <th>SpO2 Δ</th>
+            <th>Pulse App</th>
+            <th>Pulse Dev</th>
+            <th>Pulse Δ</th>
+            <th>PI App</th>
+            <th>PI Dev</th>
+            <th>PI Δ</th>
+          </tr>
+        </thead>
+        <tbody id="comp-tbody"></tbody>
+      </table>
+    </div>
+  </div>
+
+<script>
+// ─────────────────────────────────────────────────────────────────────────────
+// BLE CONSTANTS
+// ─────────────────────────────────────────────────────────────────────────────
+const SERVICE_UUID  = '6e400001-b5a3-f393-e0a9-e50e24dcca9e';
+const NOTIFY_UUID   = '0000fff1-0000-1000-8000-00805f9b34fb';
+const NAME_PREFIX   = 'iP900BPB';
+
+// ─────────────────────────────────────────────────────────────────────────────
+// STATE
+// ─────────────────────────────────────────────────────────────────────────────
+let bleDevice          = null;   // BluetoothDevice
+let bleServer          = null;   // BluetoothRemoteGATTServer
+let notifyChar         = null;   // BluetoothRemoteGATTCharacteristic
+let isConnected        = false;
+
+// Latest decoded vitals (used for comparison snapshots)
+let lastSpo2  = null;
+let lastPulse = null;
+let lastPi    = null;
+
+// Pleth waveform ring buffer — last 200 samples
+const WAVEFORM_MAX   = 200;
+const plethBuffer    = [];
+
+// Packet log — last 100 entries
+const LOG_MAX        = 100;
+const logEntries     = [];
+
+// ─────────────────────────────────────────────────────────────────────────────
+// DOM REFS
+// ─────────────────────────────────────────────────────────────────────────────
+const btnFilterd    = document.getElementById('btn-connect-filtered');
+const btnFallback   = document.getElementById('btn-connect-fallback');
+const btnDisconn    = document.getElementById('btn-disconnect');
+const statusDot     = document.getElementById('status-dot');
+const statusText    = document.getElementById('status-text');
+const errorBox      = document.getElementById('error-box');
+const valSpo2       = document.getElementById('val-spo2');
+const valPulse      = document.getElementById('val-pulse');
+const valPi         = document.getElementById('val-pi');
+const packetLog     = document.getElementById('packet-log');
+const canvas        = document.getElementById('waveform-canvas');
+const ctx           = canvas.getContext('2d');
+const btnLogComp    = document.getElementById('btn-log-comparison');
+const compTbody     = document.getElementById('comp-tbody');
+
+// ─────────────────────────────────────────────────────────────────────────────
+// UTILITY: timestamp string
+// ─────────────────────────────────────────────────────────────────────────────
+function timestamp() {
+  const d = new Date();
+  return d.toTimeString().slice(0, 8) + '.' + String(d.getMilliseconds()).padStart(3, '0');
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// UI HELPERS
+// ─────────────────────────────────────────────────────────────────────────────
+function setStatus(label, state) {
+  // state: 'connected' | 'connecting' | 'disconnected'
+  statusDot.className  = 'status-dot ' + state;
+  statusText.textContent = label;
+}
+
+function showError(msg) {
+  errorBox.style.display = 'block';
+  errorBox.textContent   = '⚠ ' + msg;
+  console.error('[BLE Error]', msg);
+}
+
+function clearError() {
+  errorBox.style.display = 'none';
+  errorBox.textContent   = '';
+}
+
+function setButtons(connected) {
+  btnFilterd.disabled = connected;
+  btnFallback.disabled = connected;
+  btnDisconn.disabled  = !connected;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PACKET DECODER
+// ─────────────────────────────────────────────────────────────────────────────
+/**
+ * Classifies and decodes a raw BLE notification packet.
+ *
+ * Packet formats confirmed for ChoiceMMed / iP900BPB:
+ *
+ *   Pleth  : [0x01, pleth_value]           length === 2
+ *   Vitals : [0x3E, spo2, 0x00, pulse,     length >= 13
+ *              0x00, zz, 0x20, 0x00,
+ *              0x00, 0x00, 0x00, pi_raw, 0xF0]
+ *
+ * Returns an object: { type, hex, ...decoded fields }
+ */
+function decodePacket(bytes) {
+  // Minimum packet size check — anything shorter is garbage
+  if (bytes.length < 2) {
+    return { type: 'unknown', hex: toHex(bytes) };
+  }
+
+  const hex = toHex(bytes);
+
+  // ── Pleth waveform packet ──────────────────────────────────────
+  if (bytes.length === 2 && bytes[0] === 0x01) {
+    const pleth = bytes[1];
+    console.log(`[Pleth] hex=${hex} pleth=${pleth}`);
+    return { type: 'pleth', hex, pleth };
+  }
+
+  // ── Vitals packet ──────────────────────────────────────────────
+  // Must be at least 13 bytes and start with 0x3E
+  if (bytes.length >= 13 && bytes[0] === 0x3E) {
+    const spo2            = bytes[1];
+    const pulse           = bytes[3];
+    const perfusionIndex  = bytes[11] / 10;   // raw byte / 10 → e.g. 0x39 (57) → 5.7
+    console.log(`[Vitals] hex=${hex} spo2=${spo2} pulse=${pulse} PI=${perfusionIndex}`);
+    return { type: 'vitals', hex, spo2, pulse, perfusionIndex };
+  }
+
+  // ── Unknown / unrecognized packet ─────────────────────────────
+  console.log(`[Unknown] hex=${hex}`);
+  return { type: 'unknown', hex };
+}
+
+/** Convert byte array to uppercase hex string, e.g. "3E 60 00 4B" */
+function toHex(bytes) {
+  return Array.from(bytes).map(b => b.toString(16).toUpperCase().padStart(2, '0')).join(' ');
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// BLE NOTIFICATION HANDLER
+// ─────────────────────────────────────────────────────────────────────────────
+function onNotification(event) {
+  const dataView = event.target.value;
+
+  // Convert DataView → plain Uint8Array for easier indexing
+  const bytes = new Uint8Array(dataView.buffer);
+
+  const packet = decodePacket(bytes);
+
+  // ── Update vitals display ──────────────────────────────────────
+  if (packet.type === 'vitals') {
+    lastSpo2  = packet.spo2;
+    lastPulse = packet.pulse;
+    lastPi    = packet.perfusionIndex;
+
+    valSpo2.textContent  = packet.spo2;
+    valPulse.textContent = packet.pulse;
+    valPi.textContent    = packet.perfusionIndex.toFixed(1);
+  }
+
+  // ── Update waveform buffer ─────────────────────────────────────
+  if (packet.type === 'pleth') {
+    plethBuffer.push(packet.pleth);
+    if (plethBuffer.length > WAVEFORM_MAX) plethBuffer.shift();
+    drawWaveform();
+  }
+
+  // ── Append to raw packet log ───────────────────────────────────
+  appendLog(packet);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// WAVEFORM RENDERER
+// ─────────────────────────────────────────────────────────────────────────────
+function drawWaveform() {
+  // Resize canvas pixels to match display size (handles device pixel ratio)
+  const dpr = window.devicePixelRatio || 1;
+  const rect = canvas.getBoundingClientRect();
+  canvas.width  = rect.width  * dpr;
+  canvas.height = rect.height * dpr;
+  ctx.scale(dpr, dpr);
+
+  const W = rect.width;
+  const H = rect.height;
+
+  ctx.clearRect(0, 0, W, H);
+
+  if (plethBuffer.length < 2) return;
+
+  // Find min/max in buffer for normalization
+  let min = 255, max = 0;
+  for (const v of plethBuffer) {
+    if (v < min) min = v;
+    if (v > max) max = v;
+  }
+  const range = max - min || 1;   // avoid divide-by-zero
+
+  const stepX = W / (WAVEFORM_MAX - 1);
+
+  ctx.beginPath();
+  ctx.strokeStyle = '#3fb950';    // green trace
+  ctx.lineWidth   = 1.5;
+  ctx.lineJoin    = 'round';
+
+  for (let i = 0; i < plethBuffer.length; i++) {
+    // Invert Y so higher pleth values appear higher on screen
+    const x = i * stepX;
+    const y = H - ((plethBuffer[i] - min) / range) * (H * 0.85) - H * 0.075;
+
+    if (i === 0) ctx.moveTo(x, y);
+    else         ctx.lineTo(x, y);
+  }
+
+  ctx.stroke();
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// RAW PACKET LOG
+// ─────────────────────────────────────────────────────────────────────────────
+function appendLog(packet) {
+  const entry = { ts: timestamp(), ...packet };
+  logEntries.push(entry);
+  if (logEntries.length > LOG_MAX) logEntries.shift();
+
+  // Build decoded values string
+  let vals = '';
+  if (packet.type === 'vitals') {
+    vals = `SpO2=${packet.spo2}% Pulse=${packet.pulse}bpm PI=${packet.perfusionIndex.toFixed(1)}`;
+  } else if (packet.type === 'pleth') {
+    vals = `pleth=${packet.pleth}`;
+  }
+
+  const div = document.createElement('div');
+  div.className = 'log-entry';
+  div.innerHTML =
+    `<span class="log-ts">${entry.ts}</span>` +
+    `<span class="log-hex">${entry.hex}</span>` +
+    `<span class="log-type ${entry.type}">[${entry.type}]</span>` +
+    `<span class="log-vals">${vals}</span>`;
+
+  // If the log was showing the placeholder, clear it first
+  if (packetLog.firstChild && packetLog.firstChild.tagName !== 'DIV') {
+    packetLog.innerHTML = '';
+  }
+
+  packetLog.appendChild(div);
+
+  // Keep scroll pinned to bottom
+  packetLog.scrollTop = packetLog.scrollHeight;
+
+  // Trim DOM nodes to LOG_MAX
+  while (packetLog.children.length > LOG_MAX) {
+    packetLog.removeChild(packetLog.firstChild);
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// BLE CONNECTION
+// ─────────────────────────────────────────────────────────────────────────────
+async function connect(useFilter) {
+  clearError();
+  setStatus('Requesting device…', 'connecting');
+  setButtons(false);
+  btnDisconn.disabled = true;
+
+  let requestOptions;
+
+  if (useFilter) {
+    // Filtered: tries to show only matching devices by service UUID / name prefix
+    requestOptions = {
+      filters: [
+        { services: [SERVICE_UUID] },
+        { namePrefix: NAME_PREFIX }
+      ]
+    };
+  } else {
+    // Fallback: show all devices; declare the service so the browser grants access
+    requestOptions = {
+      acceptAllDevices: true,
+      optionalServices: [SERVICE_UUID]
+    };
+  }
+
+  try {
+    console.log('[BLE] Requesting device, useFilter=', useFilter);
+    bleDevice = await navigator.bluetooth.requestDevice(requestOptions);
+    console.log('[BLE] Device selected:', bleDevice.name, bleDevice.id);
+
+    // Listen for disconnect events so we can update UI
+    bleDevice.addEventListener('gattserverdisconnected', onDisconnected);
+
+    setStatus('Connecting to GATT…', 'connecting');
+    bleServer = await bleDevice.gatt.connect();
+    console.log('[BLE] GATT connected');
+
+    setStatus('Getting service…', 'connecting');
+    const service = await bleServer.getPrimaryService(SERVICE_UUID);
+    console.log('[BLE] Service found');
+
+    setStatus('Getting characteristic…', 'connecting');
+    notifyChar = await service.getCharacteristic(NOTIFY_UUID);
+    console.log('[BLE] Notify characteristic found');
+
+    setStatus('Starting notifications…', 'connecting');
+    notifyChar.addEventListener('characteristicvaluechanged', onNotification);
+    await notifyChar.startNotifications();
+    console.log('[BLE] Notifications started');
+
+    isConnected = true;
+    setStatus('Connected — ' + (bleDevice.name || bleDevice.id), 'connected');
+    setButtons(true);
+
+  } catch (err) {
+    console.error('[BLE] Connection failed:', err);
+    showError(err.message || String(err));
+    setStatus('Connection failed', 'disconnected');
+    setButtons(false);
+    bleDevice = null;
+    bleServer = null;
+    notifyChar = null;
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// DISCONNECT
+// ─────────────────────────────────────────────────────────────────────────────
+async function disconnect() {
+  if (notifyChar) {
+    try {
+      notifyChar.removeEventListener('characteristicvaluechanged', onNotification);
+      await notifyChar.stopNotifications();
+    } catch (e) {
+      console.warn('[BLE] stopNotifications error (ignored):', e);
+    }
+  }
+  if (bleDevice && bleDevice.gatt.connected) {
+    bleDevice.gatt.disconnect();
+  }
+  onDisconnected();
+}
+
+function onDisconnected() {
+  console.log('[BLE] Disconnected');
+  isConnected = false;
+  bleServer   = null;
+  notifyChar  = null;
+  setStatus('Disconnected', 'disconnected');
+  setButtons(false);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// COMPARISON TOOL
+// ─────────────────────────────────────────────────────────────────────────────
+function logComparison() {
+  const devSpo2  = parseFloat(document.getElementById('input-spo2').value);
+  const devPulse = parseFloat(document.getElementById('input-pulse').value);
+  const devPi    = parseFloat(document.getElementById('input-pi').value);
+
+  if (isNaN(devSpo2) || isNaN(devPulse) || isNaN(devPi)) {
+    showError('Please fill in all three device display values before logging a comparison.');
+    return;
+  }
+  clearError();
+
+  const appSpo2  = lastSpo2  !== null ? lastSpo2  : null;
+  const appPulse = lastPulse !== null ? lastPulse : null;
+  const appPi    = lastPi    !== null ? lastPi    : null;
+
+  const fmt  = (v)         => v !== null ? v         : '—';
+  const fmtF = (v)         => v !== null ? v.toFixed(1) : '—';
+  const diff = (a, b, dec) => {
+    if (a === null) return { text: '—', cls: '' };
+    const d = parseFloat((a - b).toFixed(dec));
+    const ad = Math.abs(d);
+    const cls = ad === 0 ? 'diff-ok' : ad <= 1 ? 'diff-warn' : 'diff-bad';
+    return { text: (d >= 0 ? '+' : '') + d, cls };
+  };
+
+  const dSpo2  = diff(appSpo2,  devSpo2,  0);
+  const dPulse = diff(appPulse, devPulse, 0);
+  const dPi    = diff(appPi,    devPi,    1);
+
+  console.log(`[Comparison] ${timestamp()} SpO2 app=${appSpo2} dev=${devSpo2} Δ=${dSpo2.text} | Pulse app=${appPulse} dev=${devPulse} Δ=${dPulse.text} | PI app=${appPi} dev=${devPi} Δ=${dPi.text}`);
+
+  const tr = document.createElement('tr');
+  tr.innerHTML =
+    `<td>${timestamp()}</td>` +
+    `<td>${fmt(appSpo2)}</td><td>${devSpo2}</td><td class="${dSpo2.cls}">${dSpo2.text}</td>` +
+    `<td>${fmt(appPulse)}</td><td>${devPulse}</td><td class="${dPulse.cls}">${dPulse.text}</td>` +
+    `<td>${fmtF(appPi)}</td><td>${devPi.toFixed(1)}</td><td class="${dPi.cls}">${dPi.text}</td>`;
+
+  compTbody.appendChild(tr);
+
+  // Auto-scroll comparison table to newest row
+  tr.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// EVENT LISTENERS
+// ─────────────────────────────────────────────────────────────────────────────
+btnFilterd.addEventListener('click', () => connect(true));
+btnFallback.addEventListener('click', () => connect(false));
+btnDisconn.addEventListener('click',  disconnect);
+btnLogComp.addEventListener('click',  logComparison);
+
+// ─────────────────────────────────────────────────────────────────────────────
+// CANVAS INIT
+// ─────────────────────────────────────────────────────────────────────────────
+// Draw empty canvas on load so the element has visible dimensions
+window.addEventListener('load', () => {
+  const rect = canvas.getBoundingClientRect();
+  canvas.width  = rect.width  * (window.devicePixelRatio || 1);
+  canvas.height = rect.height * (window.devicePixelRatio || 1);
+});
+
+// Redraw waveform if window is resized (e.g. orientation change)
+window.addEventListener('resize', () => {
+  if (plethBuffer.length > 0) drawWaveform();
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// WEB BLUETOOTH AVAILABILITY CHECK
+// ─────────────────────────────────────────────────────────────────────────────
+if (!navigator.bluetooth) {
+  showError('Web Bluetooth is not available in this browser. Open this page in Bluefy on iOS, or a Chromium-based browser on desktop.');
+  btnFilterd.disabled = true;
+  btnFallback.disabled = true;
+}
+</script>
+</body>
+</html>
